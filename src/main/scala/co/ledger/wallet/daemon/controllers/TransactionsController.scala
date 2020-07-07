@@ -1,6 +1,6 @@
 package co.ledger.wallet.daemon.controllers
 
-import co.ledger.core.{BitcoinLikePickingStrategy, RippleLikeMemo}
+import co.ledger.core.{BitcoinLikePickingStrategy, RippleLikeMemo, TezosOperationTag}
 import co.ledger.wallet.daemon.controllers.requests.{CommonMethodValidations, RequestWithUser}
 import co.ledger.wallet.daemon.models.coins.StellarMemo
 import co.ledger.wallet.daemon.models.{AccountInfo, FeeMethod}
@@ -190,6 +190,30 @@ object TransactionsController {
     def validateFees: ValidationResult = CommonMethodValidations.validateFees(feesValue, fees_level)
   }
 
+  case class CreateXTZTransactionRequest(operationType: TezosOperationTag,
+                                         recipient: String,
+                                         amount: String,
+                                         gasLimit: String,
+                                         storageLimit: String,
+                                         fees_amount: Option[String],
+                                         fees_level: Option[String]) extends CreateTransactionRequest {
+    def feesValue: Option[BigInt] = fees_amount.map(BigInt(_))
+
+    override def transactionInfo: TransactionInfo =
+      XTZTransactionInfo(
+        operationType,
+        recipient,
+        BigInt(amount),
+        BigInt(gasLimit),
+        BigInt(storageLimit),
+        feesValue,
+        fees_level,
+      )
+
+    @MethodValidation
+    def validateFees: ValidationResult = CommonMethodValidations.validateFees(feesValue, fees_level)
+  }
+
   trait TransactionInfo
 
   case class BTCTransactionInfo(recipient: String,
@@ -225,6 +249,16 @@ object TransactionsController {
                                 fees: Option[BigInt],
                                 feesLevel: Option[String],
                                 memo: Option[StellarMemo]) extends TransactionInfo {
+    lazy val feesSpeedLevel: Option[FeeMethod] = feesLevel.map { level => FeeMethod.from(level) }
+  }
+
+  case class XTZTransactionInfo(operationType: TezosOperationTag,
+                                recipient: String,
+                                amount: BigInt,
+                                gasLimit: BigInt,
+                                storageLimit: BigInt,
+                                fees: Option[BigInt],
+                                feesLevel: Option[String]) extends TransactionInfo {
     lazy val feesSpeedLevel: Option[FeeMethod] = feesLevel.map { level => FeeMethod.from(level) }
   }
 }

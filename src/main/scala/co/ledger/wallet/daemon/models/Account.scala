@@ -95,6 +95,9 @@ object Account extends Logging {
     def broadcastXLMTransaction(rawTx: Array[Byte], signatures: XLMSignature, c: core.Currency): Future[String] =
       Account.broadcastXLMTransaction(rawTx, signatures, a, c)
 
+    def broadcastXTZTransaction(rawTx: Array[Byte], signatures: XTZSignature, c: core.Currency): Future[String] =
+      Account.broadcastXTZTransaction(rawTx, signatures, a, c)
+
     def createTransaction(transactionInfo: TransactionInfo, w: core.Wallet)(implicit ec: ExecutionContext): Future[TransactionView] =
       Account.createTransaction(transactionInfo, a, w)
 
@@ -267,6 +270,19 @@ object Account extends Logging {
     }
   }
 
+  def broadcastXTZTransaction(rawTx: Array[Byte], signature: XTZSignature, a: core.Account, c: core.Currency): Future[String] = {
+    c.parseUnsignedXTZTransaction(rawTx) match {
+      case Right(tx) =>
+        // set signature
+        tx.putSignature(signature, tx.getSourceAccount)
+        val signedRawTx = tx.toRawTransaction
+        debug(s"transaction after sign '${HexUtils.valueOf(signedRawTx)}'")
+        a.asTezosLikeAccount().broadcastRawTransaction(signedRawTx)
+
+      case Left(m) => Future.failed(new UnsupportedOperationException(s"Account type not supported, can't broadcast XTZ transaction: $m"))
+    }
+  }
+
   private def createBTCTransaction(ti: BTCTransactionInfo, a: core.Account, c: core.Currency)(implicit ec: ExecutionContext): Future[TransactionView] = {
     val partial: Boolean = ti.partialTx.getOrElse(false)
     for {
@@ -405,6 +421,31 @@ object Account extends Logging {
     } yield view
   }
 
+  private def createXTZTransaction(ti: XTZTransactionInfo, a: core.Account, w: core.Wallet)(implicit ec: ExecutionContext): Future[TransactionView] = {
+    val builder = a.asTezosLikeAccount().buildTransaction()
+    val tezosAccount = a.asTezosLikeAccount()
+    val tezosWallet = w.asTezosLikeWallet()
+    val currency = w.getCurrency
+
+    for {
+      // TODO: Sequence number ? How to handle this with concurrent transactions ?
+      _ <- builder.setGasLimit(currency.convertAmount(ti.gasLimit))
+      _ <- builder.setStorageLimit(ti.storageLimit)
+      _ <- builder.setFees(currency.convertAmount(ti.fees))
+
+      _ <- builder.setType(ti.operationType)
+      // Various transaction types : transaction / wipe to address / delegate / undelegate
+      amount = currency.convertAmount(ti.amount)
+      recipient = ti.recipient
+
+      // TODO: handle the "wipe to address" case properly
+
+      // build and parse as unsigned tx view
+      // libcore is responsible for creating/injecting the reveal operation if necessary
+      view <- builder.build().map(tx => UnsignedTezosTransactionView(tx))
+    } yield view
+  }
+
   def createTransaction(transactionInfo: TransactionInfo, a: core.Account, w: core.Wallet)(implicit ec: ExecutionContext): Future[TransactionView] = {
     info(s"Creating transaction $transactionInfo")
     val c = w.getCurrency
@@ -413,6 +454,7 @@ object Account extends Logging {
       case (ti: ETHTransactionInfo, WalletType.ETHEREUM) => createETHTransaction(ti, a, c)
       case (ti: XRPTransactionInfo, WalletType.RIPPLE) => createXRPTransaction(ti, a, c)
       case (ti: XLMTransactionInfo, WalletType.STELLAR) => createXLMTransaction(ti, a, w)
+      case (ti: XTZTransactionInfo, WalletType.TEZOS) => createXTZTransaction(ti, a, w)
       case _ => Future.failed(new UnsupportedOperationException("Account type not supported, can't create transaction"))
     }
   }
